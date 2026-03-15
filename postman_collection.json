@@ -1,0 +1,633 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		"name": "User Upload API",
+		"description": "API коллекция для проекта user-upload.\n\nАутентификация через OTP-верификацию по email и JWT-токены.\n\n**Флоу:**\n1. Register — регистрация и отправка OTP на email\n2. Verify OTP — подтверждение email кодом из письма\n3. Login — получение JWT-токена\n4. Upload Image — загрузка изображения (требуется JWT)\n5. List Images — список изображений с фильтрами\n6. Delete Image — удаление изображения\n\n**Rate Limit:** 5 запросов в минуту на auth-эндпоинты.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_email",
+			"value": "test@example.com",
+			"type": "string"
+		},
+		{
+			"key": "user_password",
+			"value": "password123",
+			"type": "string"
+		},
+		{
+			"key": "user_name",
+			"value": "Test User",
+			"type": "string"
+		},
+		{
+			"key": "image_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Auth",
+			"description": "Эндпоинты аутентификации: регистрация, OTP-верификация, логин.",
+			"item": [
+				{
+					"name": "Register",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 201', function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test('Response has user_id and resend', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('user_id');",
+									"    pm.expect(jsonData.data).to.have.property('resend');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"{{user_name}}\",\n    \"email\": \"{{user_email}}\",\n    \"password\": \"{{user_password}}\",\n    \"password_confirmation\": \"{{user_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "register"]
+						},
+						"description": "Регистрация нового пользователя.\n\nОтправляет 6-значный OTP-код на указанный email. Код действителен 5 минут.\n\n**Валидация:**\n- `name` — обязательно, 2–255 символов\n- `email` — обязательно, валидный email\n- `password` — обязательно, 8–128 символов, требуется подтверждение\n\n**Ошибки:**\n- `409` — пользователь уже верифицирован"
+					},
+					"response": [
+						{
+							"name": "201 Created",
+							"status": "Created",
+							"code": 201,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 201,\n    \"statusDescription\": \"Created\",\n    \"data\": {\n        \"user_id\": 1,\n        \"resend\": 60\n    }\n}"
+						},
+						{
+							"name": "409 Conflict — User Already Exists",
+							"status": "Conflict",
+							"code": 409,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 409,\n    \"statusDescription\": \"Conflict\",\n    \"data\": {\n        \"message\": \"User already exists.\"\n    }\n}"
+						},
+						{
+							"name": "422 Validation Error",
+							"status": "Unprocessable Entity",
+							"code": 422,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"The name field is required.\",\n    \"errors\": {\n        \"name\": [\"The name field is required.\"],\n        \"email\": [\"The email field is required.\"],\n        \"password\": [\"The password field is required.\"]\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Verify OTP",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has user data', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.expect(jsonData.data).to.have.property('name');",
+									"    pm.expect(jsonData.data).to.have.property('email');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{user_email}}\",\n    \"code\": 123456\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/verify-otp",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "verify-otp"]
+						},
+						"description": "Верификация email с помощью OTP-кода.\n\nПосле успешной регистрации пользователь получает 6-значный код на email. Код нужно отправить в этот эндпоинт.\n\n**Валидация:**\n- `email` — обязательно, валидный email\n- `code` — обязательно, 6-значное целое число\n\n**Ошибки:**\n- `404` — пользователь не найден\n- `422` — неверный или истёкший OTP-код"
+					},
+					"response": [
+						{
+							"name": "200 OK — User Verified",
+							"status": "OK",
+							"code": 200,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 200,\n    \"statusDescription\": \"Ok\",\n    \"data\": {\n        \"id\": 1,\n        \"name\": \"Test User\",\n        \"email\": \"test@example.com\",\n        \"images_count\": 0,\n        \"created_at\": \"2026-03-15T12:00:00+00:00\"\n    }\n}"
+						},
+						{
+							"name": "404 User Not Found",
+							"status": "Not Found",
+							"code": 404,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"User not found\"\n}"
+						},
+						{
+							"name": "422 Invalid OTP",
+							"status": "Unprocessable Entity",
+							"code": 422,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Invalid or expired OTP code\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has user and token', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('user');",
+									"    pm.expect(jsonData.data).to.have.property('token');",
+									"    pm.expect(jsonData.data.user).to.have.property('id');",
+									"    pm.expect(jsonData.data.user).to.have.property('name');",
+									"    pm.expect(jsonData.data.user).to.have.property('email');",
+									"});",
+									"",
+									"// Auto-save token to collection variable",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('token', jsonData.data.token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{user_email}}\",\n    \"password\": \"{{user_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "login"]
+						},
+						"description": "Аутентификация пользователя и получение JWT-токена.\n\nПользователь должен быть верифицирован (пройти OTP-верификацию).\n\nПри успешном логине токен автоматически сохраняется в переменную `{{token}}`.\n\n**Валидация:**\n- `email` — обязательно, валидный email\n- `password` — обязательно, строка\n\n**Ошибки:**\n- `401` — неверные учётные данные\n- `403` — email не верифицирован"
+					},
+					"response": [
+						{
+							"name": "200 OK — Login Success",
+							"status": "OK",
+							"code": 200,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 200,\n    \"statusDescription\": \"Ok\",\n    \"data\": {\n        \"user\": {\n            \"id\": 1,\n            \"name\": \"Test User\",\n            \"email\": \"test@example.com\",\n            \"images_count\": 0,\n            \"created_at\": \"2026-03-15T12:00:00+00:00\"\n        },\n        \"token\": \"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...\"\n    }\n}"
+						},
+						{
+							"name": "401 Unauthorized",
+							"status": "Unauthorized",
+							"code": 401,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Invalid credentials\"\n}"
+						},
+						{
+							"name": "403 Forbidden — Not Verified",
+							"status": "Forbidden",
+							"code": 403,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Email is not verified\"\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Images",
+			"description": "Управление изображениями. Все эндпоинты требуют JWT-токен в заголовке Authorization.",
+			"item": [
+				{
+					"name": "Upload Image",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 201', function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test('Response has image data', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.expect(jsonData.data).to.have.property('original_name');",
+									"    pm.expect(jsonData.data).to.have.property('mime_type');",
+									"    pm.expect(jsonData.data).to.have.property('size');",
+									"    pm.expect(jsonData.data).to.have.property('url');",
+									"});",
+									"",
+									"// Auto-save image_id for delete request",
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('image_id', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"type": "file",
+									"src": "",
+									"description": "JPEG или PNG, макс. 5 MB"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/images/upload",
+							"host": ["{{base_url}}"],
+							"path": ["api", "images", "upload"]
+						},
+						"description": "Загрузка изображения. Требуется JWT-токен.\n\nФайл отправляется как `multipart/form-data`.\n\nПосле загрузки автоматически запускается фоновая компрессия.\n\n**Валидация:**\n- `image` — обязательно, файл, только JPEG/PNG, макс. 5 MB\n\n**Ошибки:**\n- `401` — не авторизован\n- `422` — ошибка валидации (формат, размер)"
+					},
+					"response": [
+						{
+							"name": "201 Created",
+							"status": "Created",
+							"code": 201,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 201,\n    \"statusDescription\": \"Created\",\n    \"data\": {\n        \"id\": 1,\n        \"original_name\": \"photo.jpg\",\n        \"mime_type\": \"image/jpeg\",\n        \"size\": 245760,\n        \"is_compressed\": false,\n        \"url\": \"http://localhost:8000/storage/images/ab/cd/abc123.jpg\",\n        \"created_at\": \"2026-03-15T12:30:00+00:00\"\n    }\n}"
+						},
+						{
+							"name": "401 Unauthorized",
+							"status": "Unauthorized",
+							"code": 401,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Unauthenticated.\"\n}"
+						},
+						{
+							"name": "422 Validation Error",
+							"status": "Unprocessable Entity",
+							"code": 422,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Only JPEG and PNG formats are allowed.\",\n    \"errors\": {\n        \"image\": [\"Only JPEG and PNG formats are allowed.\"]\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "List Images",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has pagination and list', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('pagination');",
+									"    pm.expect(jsonData.data).to.have.property('list');",
+									"    pm.expect(jsonData.data.pagination).to.have.property('current');",
+									"    pm.expect(jsonData.data.pagination).to.have.property('totalItem');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/images?per_page=20&sort_by=created_at&sort_direction=desc",
+							"host": ["{{base_url}}"],
+							"path": ["api", "images"],
+							"query": [
+								{
+									"key": "per_page",
+									"value": "20",
+									"description": "Кол-во на страницу (по умолчанию 20)"
+								},
+								{
+									"key": "sort_by",
+									"value": "created_at",
+									"description": "Сортировка: created_at, original_name, size"
+								},
+								{
+									"key": "sort_direction",
+									"value": "desc",
+									"description": "Направление: asc или desc"
+								},
+								{
+									"key": "original_name",
+									"value": "",
+									"description": "Фильтр по имени файла (частичное совпадение)",
+									"disabled": true
+								},
+								{
+									"key": "mime_type",
+									"value": "",
+									"description": "Фильтр по MIME-типу: image/jpeg, image/png",
+									"disabled": true
+								},
+								{
+									"key": "date_from",
+									"value": "",
+									"description": "Дата от (YYYY-MM-DD)",
+									"disabled": true
+								},
+								{
+									"key": "date_to",
+									"value": "",
+									"description": "Дата до (YYYY-MM-DD)",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Список изображений текущего пользователя с пагинацией и фильтрами.\n\nТребуется JWT-токен.\n\n**Query-параметры (все необязательные):**\n- `per_page` — кол-во на страницу (по умолчанию 20)\n- `sort_by` — поле сортировки: `created_at`, `original_name`, `size`\n- `sort_direction` — `asc` или `desc` (по умолчанию `desc`)\n- `original_name` — фильтр по имени (частичное совпадение)\n- `mime_type` — фильтр по MIME-типу (`image/jpeg`, `image/png`)\n- `date_from` — дата от (YYYY-MM-DD)\n- `date_to` — дата до (YYYY-MM-DD)"
+					},
+					"response": [
+						{
+							"name": "200 OK — Image List",
+							"status": "OK",
+							"code": 200,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 200,\n    \"statusDescription\": \"Ok\",\n    \"data\": {\n        \"pagination\": {\n            \"current\": 1,\n            \"previous\": 0,\n            \"next\": 2,\n            \"perPage\": 20,\n            \"totalPage\": 3,\n            \"totalItem\": 47\n        },\n        \"list\": [\n            {\n                \"id\": 1,\n                \"original_name\": \"photo.jpg\",\n                \"mime_type\": \"image/jpeg\",\n                \"size\": 245760,\n                \"is_compressed\": true,\n                \"created_at\": \"2026-03-15T12:30:00+00:00\"\n            },\n            {\n                \"id\": 2,\n                \"original_name\": \"screenshot.png\",\n                \"mime_type\": \"image/png\",\n                \"size\": 1048576,\n                \"is_compressed\": false,\n                \"created_at\": \"2026-03-15T12:25:00+00:00\"\n            }\n        ]\n    }\n}"
+						},
+						{
+							"name": "401 Unauthorized",
+							"status": "Unauthorized",
+							"code": 401,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Unauthenticated.\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Get Image",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has image data', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.expect(jsonData.data).to.have.property('original_name');",
+									"    pm.expect(jsonData.data).to.have.property('mime_type');",
+									"    pm.expect(jsonData.data).to.have.property('size');",
+									"    pm.expect(jsonData.data).to.have.property('url');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/images/{{image_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "images", "{{image_id}}"]
+						},
+						"description": "Получение конкретного изображения по ID. Требуется JWT-токен.\n\nМожно получить только свои изображения.\n\n**Ошибки:**\n- `401` — не авторизован\n- `403` — изображение принадлежит другому пользователю\n- `404` — изображение не найдено"
+					},
+					"response": [
+						{
+							"name": "200 OK",
+							"status": "OK",
+							"code": 200,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 200,\n    \"statusDescription\": \"Ok\",\n    \"data\": {\n        \"id\": 1,\n        \"original_name\": \"photo.jpg\",\n        \"mime_type\": \"image/jpeg\",\n        \"size\": 245760,\n        \"is_compressed\": true,\n        \"url\": \"http://localhost:8000/storage/images/ab/cd/abc123.jpg\",\n        \"created_at\": \"2026-03-15T12:30:00+00:00\"\n    }\n}"
+						},
+						{
+							"name": "401 Unauthorized",
+							"status": "Unauthorized",
+							"code": 401,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Unauthenticated.\"\n}"
+						},
+						{
+							"name": "403 Forbidden",
+							"status": "Forbidden",
+							"code": 403,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 403,\n    \"statusDescription\": \"Forbidden\",\n    \"data\": {\n        \"message\": \"Forbidden\"\n    }\n}"
+						},
+						{
+							"name": "404 Not Found",
+							"status": "Not Found",
+							"code": 404,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"No query results for model [App\\\\Models\\\\Image] {id}\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Delete Image",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 204', function () {",
+									"    pm.response.to.have.status(204);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/images/{{image_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "images", "{{image_id}}"]
+						},
+						"description": "Удаление изображения по ID. Требуется JWT-токен.\n\nМожно удалять только свои изображения.\n\n**Ошибки:**\n- `401` — не авторизован\n- `403` — изображение принадлежит другому пользователю\n- `404` — изображение не найдено"
+					},
+					"response": [
+						{
+							"name": "204 No Content",
+							"status": "No Content",
+							"code": 204,
+							"header": [],
+							"body": ""
+						},
+						{
+							"name": "401 Unauthorized",
+							"status": "Unauthorized",
+							"code": 401,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"Unauthenticated.\"\n}"
+						},
+						{
+							"name": "403 Forbidden",
+							"status": "Forbidden",
+							"code": 403,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"statusCode\": 403,\n    \"statusDescription\": \"Forbidden\",\n    \"data\": {\n        \"message\": \"Forbidden\"\n    }\n}"
+						},
+						{
+							"name": "404 Not Found",
+							"status": "Not Found",
+							"code": 404,
+							"header": [
+								{"key": "Content-Type", "value": "application/json"}
+							],
+							"body": "{\n    \"message\": \"No query results for model [App\\\\Models\\\\Image] {id}\"\n}"
+						}
+					]
+				}
+			]
+		}
+	]
+}
