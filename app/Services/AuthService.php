@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\DTOs\Auth\LoginDTO;
+use App\DTOs\Auth\LoginResultDTO;
+use App\DTOs\Auth\OtpResultDTO;
 use App\DTOs\Auth\RegisterDTO;
 use App\Exceptions\InvalidCredentialsException;
 use App\Exceptions\InvalidOtpException;
@@ -11,67 +13,89 @@ use App\Exceptions\UserNotFoundException;
 use App\Exceptions\UserNotVerifiedException;
 use App\Mail\OtpMail;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Redis;
 
 class AuthService
 {
-    public function setOtpCode(RegisterDTO $dto): array
-    {
-        $user = User::query()->where('email', $dto->email)->first();
+    private const OTP_TTL_SECONDS = 300;
+    private const OTP_RESEND_SECONDS = 60;
+    private const OTP_MAX_ATTEMPTS = 5;
 
-        if ($user && $user->verified_at !== null) {
+    public function register(RegisterDTO $dto): OtpResultDTO
+    {
+        $user = User::where('email', $dto->email)->first();
+
+        if ($user?->verified_at !== null) {
             throw new UserAlreadyExistsException();
         }
+
         $code = random_int(100000, 999999);
-        Redis::client()->set($dto->email, $code, ['ex' => 300]);
+
+        $user = DB::transaction(function () use ($user, $dto, $code) {
+            if ($user) {
+                $user->update([
+                    'name' => $dto->name,
+                    'password' => $dto->password,
+                ]);
+            } else {
+                $user = User::create([
+                    'name' => $dto->name,
+                    'email' => $dto->email,
+                    'password' => $dto->password,
+                ]);
+            }
+
+            Cache::put("otp:{$dto->email}", $code, self::OTP_TTL_SECONDS);
+            Cache::put("otp_attempts:{$dto->email}", 0, self::OTP_TTL_SECONDS);
+
+            return $user;
+        });
 
         Mail::to($dto->email)->send(new OtpMail($code));
 
-        if (!$user) {
-            $user = User::query()->create([
-                'name' => $dto->name,
-                'email' => $dto->email,
-                'password' => $dto->password,
-            ]);
-        } else {
-            $user->update([
-                'name' => $dto->name,
-                'password' => $dto->password,
-            ]);
-        }
-
-        return [
-            'user_id' => $user->id,
-            'resend' => 60,
-        ];
+        return new OtpResultDTO(
+            userId: $user->id,
+            resendIn: self::OTP_RESEND_SECONDS,
+        );
     }
 
-    public function verifyOtpCode(string $email, int $code): User
+    public function verifyOtp(string $email, int $code): User
     {
-        $user = User::query()->where('email', $email)->whereNull('verified_at')->first();
+        $user = User::where('email', $email)->whereNull('verified_at')->first();
 
         if (!$user) {
             throw new UserNotFoundException();
         }
 
-        $cached = Redis::client()->get($email);
+        $attemptsKey = "otp_attempts:{$email}";
+        $attempts = (int) Cache::get($attemptsKey, 0);
+
+        if ($attempts >= self::OTP_MAX_ATTEMPTS) {
+            Cache::forget("otp:{$email}");
+            Cache::forget($attemptsKey);
+            throw new InvalidOtpException('Too many attempts. Request a new code.');
+        }
+
+        $cached = Cache::get("otp:{$email}");
 
         if (!$cached || (int) $cached !== $code) {
+            Cache::increment($attemptsKey);
             throw new InvalidOtpException();
         }
 
-        Redis::client()->del($email);
+        Cache::forget("otp:{$email}");
+        Cache::forget($attemptsKey);
 
         $user->update(['verified_at' => now()]);
 
         return $user->refresh();
     }
 
-    public function login(LoginDTO $dto): array
+    public function login(LoginDTO $dto): LoginResultDTO
     {
-        $user = User::query()->where('email', $dto->email)->first();
+        $user = User::where('email', $dto->email)->first();
 
         if (!$user) {
             throw new InvalidCredentialsException();
@@ -90,9 +114,9 @@ class AuthService
             throw new InvalidCredentialsException();
         }
 
-        return [
-            'user' => $user,
-            'token' => $token,
-        ];
+        return new LoginResultDTO(
+            user: $user,
+            token: $token,
+        );
     }
 }

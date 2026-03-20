@@ -2,10 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\DTOs\Auth\LoginDTO;
-use App\DTOs\Auth\RegisterDTO;
-use App\Enums\HttpCode;
-use App\Helpers\ResponseHelper;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegistrationRequest;
@@ -13,39 +9,43 @@ use App\Http\Requests\Auth\VerifyOtpRequest;
 use App\Http\Resources\UserResource;
 use App\Services\AuthService;
 use Illuminate\Http\JsonResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
     public function __construct(
-        private AuthService $authService
-    ){}
+        private readonly AuthService $authService,
+    ) {}
 
     public function register(RegistrationRequest $request): JsonResponse
     {
-        $dto = RegisterDTO::fromRequest($request->validated());
-        $result = $this->authService->setOtpCode($dto);
+        $result = $this->authService->register($request->toDTO());
 
-        return ResponseHelper::response($result, HttpCode::CREATED);
+        return response()->json([
+            'user_id' => $result->userId,
+            'resend_in' => $result->resendIn,
+        ], Response::HTTP_CREATED);
     }
 
     public function verifyOtp(VerifyOtpRequest $request): JsonResponse
     {
-        $user = $this->authService->verifyOtpCode(
+        $user = $this->authService->verifyOtp(
             $request->validated('email'),
             $request->validated('code'),
         );
 
-        return ResponseHelper::response(new UserResource($user));
+        return response()->json([
+            'data' => new UserResource($user),
+        ]);
     }
 
     public function login(LoginRequest $request): JsonResponse
     {
-        $dto = LoginDTO::fromRequest($request->validated());
-        $result = $this->authService->login($dto);
+        $result = $this->authService->login($request->toDTO());
 
-        return ResponseHelper::response([
-            'user' => new UserResource($result['user']),
-            'token' => $result['token'],
+        return response()->json([
+            'data' => new UserResource($result->user),
+            'token' => $result->token,
         ]);
     }
 }

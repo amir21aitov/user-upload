@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\File;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class FileService
@@ -12,42 +13,51 @@ class FileService
     {
         $hash = hash_file('sha256', $uploadedFile->getRealPath());
 
-        $existing = File::query()->where('hash', $hash)->first();
+        return DB::transaction(function () use ($uploadedFile, $hash) {
+            $existing = File::where('hash', $hash)->lockForUpdate()->first();
 
-        if ($existing) {
-            $existing->increment('reference_count');
-            return $existing;
-        }
+            if ($existing) {
+                $existing->increment('reference_count');
+                return $existing;
+            }
 
-        $path = $this->generatePath($hash, $uploadedFile->getClientOriginalExtension());
+            $path = $this->generatePath($hash, $uploadedFile->getClientOriginalExtension());
 
-        Storage::disk('public')->putFileAs(
-            dirname($path),
-            $uploadedFile,
-            basename($path),
-        );
+            Storage::disk('public')->putFileAs(
+                dirname($path),
+                $uploadedFile,
+                basename($path),
+            );
 
-        return File::query()->create([
-            'hash' => $hash,
-            'path' => $path,
-            'disk' => 'public',
-            'mime_type' => $uploadedFile->getMimeType(),
-            'original_extension' => strtolower($uploadedFile->getClientOriginalExtension()),
-            'size' => $uploadedFile->getSize(),
-            'is_compressed' => false,
-            'reference_count' => 1,
-        ]);
+            return File::create([
+                'hash' => $hash,
+                'path' => $path,
+                'disk' => 'public',
+                'mime_type' => $uploadedFile->getMimeType(),
+                'original_extension' => strtolower($uploadedFile->getClientOriginalExtension()),
+                'size' => $uploadedFile->getSize(),
+                'is_compressed' => false,
+                'reference_count' => 1,
+            ]);
+        });
     }
 
     public function decrementReference(File $file): void
     {
-        $file->decrement('reference_count');
-        $file->refresh();
+        DB::transaction(function () use ($file) {
+            $file = File::lockForUpdate()->find($file->id);
 
-        if ($file->reference_count <= 0) {
-            Storage::disk($file->disk)->delete($file->path);
-            $file->delete();
-        }
+            if (!$file) {
+                return;
+            }
+
+            $file->decrement('reference_count');
+
+            if ($file->reference_count <= 0) {
+                Storage::disk($file->disk)->delete($file->path);
+                $file->delete();
+            }
+        });
     }
 
     public function getFullPath(File $file): string

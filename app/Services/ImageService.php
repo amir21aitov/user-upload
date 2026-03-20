@@ -19,7 +19,7 @@ class ImageService
     {
         $file = $this->fileService->storeOrFind($uploadedFile);
 
-        $image = Image::query()->create([
+        $image = Image::create([
             'user_id' => $user->id,
             'file_id' => $file->id,
             'original_name' => $uploadedFile->getClientOriginalName(),
@@ -34,10 +34,10 @@ class ImageService
 
     public function listForUser(User $user, ImageFilterDTO $filters): LengthAwarePaginator
     {
-        $query = Image::with(['file'])->where('user_id', $user->id);
+        $query = Image::with('file')->where('user_id', $user->id);
 
         if ($filters->originalName) {
-            $query->where('original_name', 'ilike', "%{$filters->originalName}%");
+            $query->where('original_name', 'like', "%{$filters->originalName}%");
         }
 
         if ($filters->mimeType) {
@@ -52,13 +52,20 @@ class ImageService
             $query->whereDate('created_at', '<=', $filters->dateTo);
         }
 
-        $sortBy = match ($filters->sortBy) {
-            'original_name' => 'original_name',
-            'size' => 'file_id',
-            default => 'created_at',
-        };
-
-        $query->orderBy($sortBy, $filters->sortDirection);
+        if ($filters->sortBy === 'size') {
+            $query->joinSub(
+                \App\Models\File::select('id', 'size'),
+                'files_sort',
+                'files_sort.id',
+                'images.file_id',
+            )->orderBy('files_sort.size', $filters->sortDirection);
+        } else {
+            $sortColumn = match ($filters->sortBy) {
+                'original_name' => 'original_name',
+                default => 'created_at',
+            };
+            $query->orderBy($sortColumn, $filters->sortDirection);
+        }
 
         return $query->paginate($filters->perPage);
     }
