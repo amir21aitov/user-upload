@@ -2,24 +2,29 @@
 
 namespace App\Services;
 
+use App\Contracts\FileServiceInterface;
+use App\Contracts\ImageServiceInterface;
 use App\DTOs\Image\ImageFilterDTO;
+use App\Events\ImageDeleted;
+use App\Events\ImageUploaded;
 use App\Jobs\CompressImageJob;
 use App\Models\Image;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 
-class ImageService
+class ImageService implements ImageServiceInterface
 {
     public function __construct(
-        private readonly FileService $fileService,
+        private readonly FileServiceInterface $fileService,
     ) {}
 
     public function upload(UploadedFile $uploadedFile, User $user): Image
     {
         $file = $this->fileService->storeOrFind($uploadedFile);
 
-        $image = Image::create([
+        $image = Image::query()->create([
             'user_id' => $user->id,
             'file_id' => $file->id,
             'original_name' => $uploadedFile->getClientOriginalName(),
@@ -29,12 +34,21 @@ class ImageService
             CompressImageJob::dispatch($file->id);
         }
 
+        Log::info('Image uploaded', [
+            'image_id' => $image->id,
+            'user_id' => $user->id,
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'file_id' => $file->id,
+        ]);
+
+        ImageUploaded::dispatch($image, $user);
+
         return $image->load('file');
     }
 
     public function listForUser(User $user, ImageFilterDTO $filters): LengthAwarePaginator
     {
-        $query = Image::with('file')->where('user_id', $user->id);
+        $query = Image::query()->with('file')->where('user_id', $user->id);
 
         if ($filters->originalName) {
             $query->where('original_name', 'like', "%{$filters->originalName}%");
@@ -54,7 +68,7 @@ class ImageService
 
         if ($filters->sortBy === 'size') {
             $query->joinSub(
-                \App\Models\File::select('id', 'size'),
+                \App\Models\File::query()->select('id', 'size'),
                 'files_sort',
                 'files_sort.id',
                 'images.file_id',
@@ -72,8 +86,20 @@ class ImageService
 
     public function delete(Image $image): void
     {
+        $imageId = $image->id;
+        $originalName = $image->original_name;
+        $user = $image->user;
         $file = $image->file;
+
         $image->delete();
         $this->fileService->decrementReference($file);
+
+        Log::info('Image deleted', [
+            'image_id' => $imageId,
+            'user_id' => $user->id,
+            'original_name' => $originalName,
+        ]);
+
+        ImageDeleted::dispatch($imageId, $originalName, $user);
     }
 }

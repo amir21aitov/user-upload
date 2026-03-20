@@ -2,10 +2,14 @@
 
 namespace App\Services;
 
+use App\Contracts\AuthServiceInterface;
 use App\DTOs\Auth\LoginDTO;
 use App\DTOs\Auth\LoginResultDTO;
 use App\DTOs\Auth\OtpResultDTO;
 use App\DTOs\Auth\RegisterDTO;
+use App\Events\OtpVerified;
+use App\Events\UserLoggedIn;
+use App\Events\UserRegistered;
 use App\Exceptions\InvalidCredentialsException;
 use App\Exceptions\InvalidOtpException;
 use App\Exceptions\UserAlreadyExistsException;
@@ -15,9 +19,10 @@ use App\Mail\OtpMail;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
-class AuthService
+class AuthService implements AuthServiceInterface
 {
     private const OTP_TTL_SECONDS = 300;
     private const OTP_RESEND_SECONDS = 60;
@@ -25,9 +30,10 @@ class AuthService
 
     public function register(RegisterDTO $dto): OtpResultDTO
     {
-        $user = User::where('email', $dto->email)->first();
+        $user = User::query()->where('email', $dto->email)->first();
 
         if ($user?->verified_at !== null) {
+            Log::info('Registration attempt for already verified email', ['email' => $dto->email]);
             throw new UserAlreadyExistsException();
         }
 
@@ -40,7 +46,7 @@ class AuthService
                     'password' => $dto->password,
                 ]);
             } else {
-                $user = User::create([
+                $user = User::query()->create([
                     'name' => $dto->name,
                     'email' => $dto->email,
                     'password' => $dto->password,
@@ -55,6 +61,10 @@ class AuthService
 
         Mail::to($dto->email)->send(new OtpMail($code));
 
+        Log::info('User registered, OTP sent', ['user_id' => $user->id, 'email' => $dto->email]);
+
+        UserRegistered::dispatch($user);
+
         return new OtpResultDTO(
             userId: $user->id,
             resendIn: self::OTP_RESEND_SECONDS,
@@ -63,9 +73,10 @@ class AuthService
 
     public function verifyOtp(string $email, int $code): User
     {
-        $user = User::where('email', $email)->whereNull('verified_at')->first();
+        $user = User::query()->where('email', $email)->whereNull('verified_at')->first();
 
         if (!$user) {
+            Log::warning('OTP verification for non-existent or already verified user', ['email' => $email]);
             throw new UserNotFoundException();
         }
 
@@ -75,6 +86,7 @@ class AuthService
         if ($attempts >= self::OTP_MAX_ATTEMPTS) {
             Cache::forget("otp:{$email}");
             Cache::forget($attemptsKey);
+            Log::warning('OTP brute-force blocked', ['email' => $email, 'attempts' => $attempts]);
             throw new InvalidOtpException('Too many attempts. Request a new code.');
         }
 
@@ -82,6 +94,7 @@ class AuthService
 
         if (!$cached || (int) $cached !== $code) {
             Cache::increment($attemptsKey);
+            Log::info('Invalid OTP attempt', ['email' => $email, 'attempt' => $attempts + 1]);
             throw new InvalidOtpException();
         }
 
@@ -90,18 +103,24 @@ class AuthService
 
         $user->update(['verified_at' => now()]);
 
-        return $user->refresh();
+        Log::info('User verified via OTP', ['user_id' => $user->id, 'email' => $email]);
+
+        OtpVerified::dispatch($user->refresh());
+
+        return $user;
     }
 
     public function login(LoginDTO $dto): LoginResultDTO
     {
-        $user = User::where('email', $dto->email)->first();
+        $user = User::query()->where('email', $dto->email)->first();
 
         if (!$user) {
+            Log::info('Login attempt for non-existent email', ['email' => $dto->email]);
             throw new InvalidCredentialsException();
         }
 
         if ($user->verified_at === null) {
+            Log::info('Login attempt for unverified user', ['user_id' => $user->id]);
             throw new UserNotVerifiedException();
         }
 
@@ -111,8 +130,13 @@ class AuthService
         ]);
 
         if (!$token) {
+            Log::info('Failed login attempt (wrong password)', ['user_id' => $user->id]);
             throw new InvalidCredentialsException();
         }
+
+        Log::info('User logged in', ['user_id' => $user->id]);
+
+        UserLoggedIn::dispatch($user);
 
         return new LoginResultDTO(
             user: $user,

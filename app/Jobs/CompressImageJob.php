@@ -24,7 +24,7 @@ class CompressImageJob implements ShouldQueue
 
     public function handle(): void
     {
-        $file = File::find($this->fileId);
+        $file = File::query()->find($this->fileId);
 
         if (!$file || $file->is_compressed) {
             return;

@@ -7,7 +7,7 @@ use App\Http\Requests\Image\ImageIndexRequest;
 use App\Http\Requests\Image\UploadImageRequest;
 use App\Http\Resources\ImageResource;
 use App\Models\Image;
-use App\Services\ImageService;
+use App\Contracts\ImageServiceInterface;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,7 +17,7 @@ class ImageController extends Controller
     use AuthorizesRequests;
 
     public function __construct(
-        private readonly ImageService $imageService,
+        private readonly ImageServiceInterface $imageService,
     ) {}
 
     public function upload(UploadImageRequest $request): JsonResponse
